@@ -268,7 +268,30 @@ canvas{display:block}
     </button>
   </div>
 
-  <div style="margin-top:18px;font-size:11px;color:#222;text-align:center;letter-spacing:.04em">🔒 Seus dados ficam privados na nuvem</div>
+  <!-- Esqueci senha -->
+  <div style="margin-top:14px;text-align:center">
+    <button onclick="finForgotPassword()" style="background:none;border:none;cursor:pointer;color:#2a7a8a;font-size:12px;font-family:'Outfit',sans-serif;letter-spacing:.02em;padding:4px 8px">
+      Esqueci minha senha
+    </button>
+  </div>
+  <div style="margin-top:8px;font-size:11px;color:#1e1e1e;text-align:center;letter-spacing:.04em">🔒 Seus dados ficam privados na nuvem</div>
+</div>
+
+<!-- ═══ Modal Boas-Vindas (pedir nome) ═══ -->
+<div id="welcome-modal" style="display:none;position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.92);align-items:center;justify-content:center;padding:28px;font-family:'Outfit',sans-serif">
+  <div style="width:100%;max-width:340px;background:#0d0d0d;border:1px solid rgba(0,229,255,.2);border-radius:22px;padding:28px;box-shadow:0 0 60px rgba(0,229,255,.08)">
+    <div style="font-size:28px;text-align:center;margin-bottom:12px">👋</div>
+    <div style="font-size:19px;font-weight:800;color:#fff;margin-bottom:6px;text-align:center">Bem-vindo ao FIN!</div>
+    <div style="font-size:13px;color:#444;margin-bottom:22px;text-align:center">Como posso te chamar?</div>
+    <input id="welcome-name" type="text" placeholder="Seu primeiro nome" maxlength="30"
+      style="width:100%;box-sizing:border-box;padding:13px 14px;border-radius:10px;background:rgba(255,255,255,.05);border:1.5px solid rgba(0,229,255,.25);color:#fff;font-size:15px;font-family:'Outfit',sans-serif;outline:none;text-align:center;margin-bottom:18px"
+      onfocus="this.style.borderColor='rgba(0,229,255,.55)'" onblur="this.style.borderColor='rgba(0,229,255,.25)'"
+      onkeydown="if(event.key==='Enter')finSaveName()">
+    <button onclick="finSaveName()"
+      style="width:100%;padding:14px;border-radius:12px;background:linear-gradient(135deg,#00e5ff,#0088bb);border:none;color:#000;font-size:15px;font-weight:800;letter-spacing:.05em;cursor:pointer;font-family:'Outfit',sans-serif;box-shadow:0 0 24px rgba(0,229,255,.2)">
+      CONTINUAR →
+    </button>
+  </div>
 </div>
 
 <!-- ═══ Firebase Init + Auth ═══ -->
@@ -337,6 +360,27 @@ canvas{display:block}
     _auth.signOut();
   };
 
+  // ── Recuperação de senha ─────────────────────────────────
+  window.finForgotPassword = function(){
+    var email = (document.getElementById('login-email').value||'').trim();
+    var errEl = document.getElementById('login-err');
+    if(!email){
+      if(errEl) errEl.textContent='Digite seu e-mail acima antes de continuar.';
+      document.getElementById('login-email').focus();
+      return;
+    }
+    if(errEl){ errEl.style.color='#ff4466'; errEl.textContent=''; }
+    _auth.sendPasswordResetEmail(email)
+      .then(function(){
+        if(errEl){
+          errEl.style.color='#00e5ff';
+          errEl.textContent='✅ Link enviado! Verifique sua caixa de entrada.';
+          setTimeout(function(){ errEl.style.color='#ff4466'; errEl.textContent=''; },7000);
+        }
+      })
+      .catch(function(e){ mostrarErro(e.code, e.message); });
+  };
+
   // ── Login E-mail/Senha com auto-cadastro ─────────────────
   window.finLogin = function(){
     var email = (document.getElementById('login-email').value||'').trim();
@@ -382,40 +426,112 @@ canvas{display:block}
   };
 
   // ── Auth state ───────────────────────────────────────────
+  // Referências aos dois documentos do user
+  var _perfil = function(uid){ return _db.doc('usuarios/'+uid+'/perfil/dados'); };
+
+  // ── Mostrar modal de nome (conta nova) ─────────────────────
+  window.finSaveName = function(){
+    var nm = (document.getElementById('welcome-name').value||'').trim();
+    if(!nm){ document.getElementById('welcome-name').focus(); return; }
+    var uid = _auth.currentUser && _auth.currentUser.uid;
+    if(!uid) return;
+    // Salvar nome no Firestore perfil
+    _perfil(uid).set({ nome: nm }, { merge: true }).catch(function(e){
+      console.warn('[FIN] perfil save:', e.message);
+    });
+    // Salvar no estado local
+    S.userName = nm;
+    localStorage.setItem('fin_v1', JSON.stringify(S));
+    // Esconder modal e mostrar app
+    var wm = document.getElementById('welcome-modal');
+    if(wm) wm.style.display = 'none';
+    window.autoCreateRecurring && window.autoCreateRecurring();
+    window.render && window.render();
+    window.showToast && window.showToast('Olá, ' + nm + '! 👋');
+  };
+
   _auth.onAuthStateChanged(function(user){
     var ls  = document.getElementById('login-screen');
     var ap  = document.getElementById('app');
+    var wm  = document.getElementById('welcome-modal');
 
     if(!user){
-      if(ls) ls.style.display='flex';
-      if(ap) ap.style.display='none';
+      if(ls) ls.style.display = 'flex';
+      if(ap) ap.style.display = 'none';
+      if(wm) wm.style.display = 'none';
       setBtnState('login-btn','ENTRAR / CADASTRAR', false);
-      var gb=document.getElementById('google-btn');
-      if(gb) gb.disabled=false;
+      var gb = document.getElementById('google-btn');
+      if(gb) gb.disabled = false;
       return;
     }
 
-    // Logado — mostrar app com dados locais imediatamente
-    if(ls) ls.style.display='none';
-    if(ap) ap.style.display='flex';
-    window.autoCreateRecurring && window.autoCreateRecurring();
-    window.render && window.render();
+    // ── Mudança de usuário → limpar dados locais do anterior ──
+    var lastUid = localStorage.getItem('fin_uid');
+    if(lastUid && lastUid !== user.uid){
+      localStorage.removeItem('fin_v1');
+      S = Object.assign({}, window.INIT || S);
+      console.log('[FIN] Novo usuário — cache limpo');
+    }
+    localStorage.setItem('fin_uid', user.uid);
 
-    // Carregar dados da nuvem em paralelo
-    _ref(user.uid).get().then(function(snap){
-      if(snap.exists){
-        var data = snap.data();
-        if(data.bills && window.dedupBills) data.bills=window.dedupBills(data.bills);
-        S = Object.assign({}, S, data, {
-          bills:        data.bills        || S.bills,
-          transactions: data.transactions || S.transactions,
-          installments: data.installments || S.installments,
+    // Esconder login
+    if(ls) ls.style.display = 'none';
+
+    // ── Carregar perfil (nome) + dados em paralelo ─────────────
+    Promise.all([
+      _perfil(user.uid).get(),
+      _ref(user.uid).get()
+    ]).then(function(results){
+      var perfSnap = results[0];
+      var dadosSnap = results[1];
+
+      // Nome do usuário
+      var nomeCloud = perfSnap.exists ? (perfSnap.data().nome || '') : '';
+      // Google já tem displayName — usar como fallback
+      var nomeFallback = user.displayName || '';
+      var nomeLocal = S.userName && S.userName !== 'Matheus' ? S.userName : '';
+      var nomeDefinitivo = nomeCloud || nomeLocal || nomeFallback || '';
+
+      // Dados financeiros
+      if(dadosSnap.exists){
+        var data = dadosSnap.data();
+        if(data.bills && window.dedupBills) data.bills = window.dedupBills(data.bills);
+        S = Object.assign({}, window.INIT || S, data, {
+          bills:        data.bills        || [],
+          transactions: data.transactions || [],
+          installments: data.installments || [],
+          userName:     nomeDefinitivo || data.userName || 'Usuário',
         });
+      } else {
+        // Conta nova — estado limpo com nome
+        S = Object.assign({}, window.INIT || S, {
+          userName: nomeDefinitivo || 'Usuário',
+        });
+      }
+
+      // Mostrar app
+      if(ap) ap.style.display = 'flex';
+
+      // Conta nova sem nome → mostrar modal de boas-vindas
+      if(!nomeDefinitivo && !dadosSnap.exists){
+        if(wm){ wm.style.display = 'flex'; }
+        // Pré-preencher com displayName do Google se disponível
+        var inp = document.getElementById('welcome-name');
+        if(inp && nomeFallback) inp.value = nomeFallback.split(' ')[0];
+      } else {
+        if(wm) wm.style.display = 'none';
         window.autoCreateRecurring && window.autoCreateRecurring();
         window.render && window.render();
-        window.showToast && window.showToast('☁️ Dados sincronizados');
+        if(dadosSnap.exists) window.showToast && window.showToast('☁️ Olá, '+S.userName+'!');
       }
-    }).catch(function(e){ console.warn('[FIN] load:',e.message); });
+
+    }).catch(function(e){
+      console.warn('[FIN] load error:', e.message);
+      if(ap) ap.style.display = 'flex';
+      if(wm) wm.style.display = 'none';
+      window.autoCreateRecurring && window.autoCreateRecurring();
+      window.render && window.render();
+    });
   });
 })();
 </script>
@@ -537,7 +653,7 @@ const AVS=[
   {id:'av3',emoji:'👩‍💼',label:'Ana',   bg:'linear-gradient(135deg,#1a0a2e,#2d0f4e)',border:'#a78bfa'},
   {id:'av4',emoji:'👩‍🔧',label:'Pro',   bg:'linear-gradient(135deg,#001a14,#003322)',border:'#00e676'},
 ];
-const INIT={mode:'moto',transactions:[],bills:[],installments:[],metaDiaria:250,userName:'Matheus',avatarId:'av1'};
+const INIT={mode:'moto',transactions:[],bills:[],installments:[],metaDiaria:250,userName:'',avatarId:'av1'};
 
 
 // ─── ESTADOS GLOBAIS ────────────────────────────────────────────────
@@ -2727,6 +2843,7 @@ function copiarFixas(){
 // Inicializar — localStorage imediato, cloud via onAuthStateChanged
 S = loadS();
 // Expor ao Firebase init (que corre após este script)
+window.INIT                = Object.assign({}, INIT); // snapshot do estado inicial
 window.dedupBills          = dedupBills;
 window.autoCreateRecurring = autoCreateRecurring;
 window.render              = render;
